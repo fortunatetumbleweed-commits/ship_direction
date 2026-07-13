@@ -15,9 +15,22 @@ from train import HeadingNet, to_tensor, vec_to_deg, circ_err, load_real, DEVICE
 HERE = os.path.dirname(os.path.abspath(__file__))
 W = 80; CENTER = (40.0, 40.0)
 
-def load_model(path=os.path.join(HERE, "model.pt")):
-    m = HeadingNet().to(DEVICE)
-    m.load_state_dict(torch.load(path, map_location=DEVICE)); m.eval()
+def latest_model():
+    """Newest model_v*.pt (fallback to legacy model.pt)."""
+    cands = sorted(glob.glob(os.path.join(HERE, "model_v*.pt")))
+    return cands[-1] if cands else os.path.join(HERE, "model.pt")
+
+def load_model(path=None):
+    path = path or latest_model()
+    ckpt = torch.load(path, map_location=DEVICE)
+    if isinstance(ckpt, dict) and "state_dict" in ckpt:      # self-describing checkpoint
+        state, meta = ckpt["state_dict"], ckpt.get("meta", {})
+        print(f"model: {os.path.basename(path)}"
+              + (f"  (v{meta.get('version')}, trained {meta.get('trained_at')}, "
+                 f"val {meta.get('val')})" if meta else ""))
+    else:                                                    # legacy raw state_dict
+        state = ckpt; print(f"model: {os.path.basename(path)} (legacy, no metadata)")
+    m = HeadingNet().to(DEVICE); m.load_state_dict(state); m.eval()
     return m
 
 @torch.no_grad()
@@ -36,9 +49,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("images", nargs="*")
     ap.add_argument("--out-dir", default=os.path.join(HERE, "out"))
+    ap.add_argument("--model", default=None, help="checkpoint path (default: newest model_v*.pt)")
     ap.add_argument("--validate", action="store_true")
     args = ap.parse_args()
-    model = load_model(); sprite = dg.build_ship_sprite()
+    model = load_model(args.model); sprite = dg.build_ship_sprite()
 
     if args.validate:
         xr, degs, names = load_real()

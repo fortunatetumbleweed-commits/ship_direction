@@ -6,10 +6,13 @@ Data is synthetic (see datagen.py) so it can use scene context the template matc
 can't. Validation is on the 21 REAL labelled images (their truthNNN), reported each
 epoch as the honest generalization signal.
 
-Run:  python train.py [--steps N] [--n-train K]
-Saves best-by-real-validation weights to model.pt.
+Run:  python train.py [--n-train K] [--epochs N] [--version V]
+Saves a self-describing checkpoint to model_v{VERSION}.pt (state_dict + a `meta`
+block: version, timestamp, training config, validation metrics, and a hash of the
+training code). Bump MODEL_VERSION whenever you change the training setup.
 """
-import os, re, glob, time, argparse, random
+import os, re, glob, time, argparse, random, hashlib, datetime
+from copy import deepcopy
 import numpy as np
 import torch, torch.nn as nn
 from PIL import Image
@@ -18,6 +21,14 @@ import datagen as dg
 HERE = os.path.dirname(os.path.abspath(__file__))
 W = 80
 DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
+MODEL_VERSION = 1   # bump when the training setup (datagen / arch / recipe) changes
+
+def code_hash():
+    """Short hash of the training pipeline, to tell whether two models share a recipe."""
+    h = hashlib.sha256()
+    for fn in ("datagen.py", "train.py"):
+        with open(os.path.join(HERE, fn), "rb") as f: h.update(f.read())
+    return h.hexdigest()[:12]
 
 def to_tensor(imgs_u8):
     x = torch.from_numpy(imgs_u8.astype(np.float32) / 255.0 - 0.5)
@@ -75,6 +86,7 @@ def main():
     ap.add_argument("--epochs", type=int, default=25)
     ap.add_argument("--batch", type=int, default=128)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--version", default=str(MODEL_VERSION), help="version tag for the saved checkpoint")
     args = ap.parse_args()
     random.seed(args.seed); np.random.seed(args.seed); torch.manual_seed(args.seed)
 
@@ -90,7 +102,7 @@ def main():
     opt = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, args.epochs)
     lossf = nn.MSELoss()
-    n = Xtr_t.shape[0]; best = 1e9
+    n = Xtr_t.shape[0]; best = 1e9; best_state = None
     for ep in range(args.epochs):
         model.train(); perm = torch.randperm(n)
         tot = 0.0
@@ -103,15 +115,30 @@ def main():
         err, hard, synth = evaluate(model, xr, degs, names)
         tag = ""
         if hard.mean() < best:
-            best = hard.mean(); torch.save(model.state_dict(), os.path.join(HERE, "model.pt")); tag = "  *saved"
+            best = hard.mean(); best_state = deepcopy(model.state_dict()); tag = "  *best"
         print(f"ep{ep:02d} loss={tot/n:.4f}  synth_mean={synth.mean():5.1f}  "
               f"hard_mean={hard.mean():5.1f} hard_median={np.median(hard):5.1f} "
               f"hard_within20={(hard<=20).sum()}/{len(hard)}{tag}")
-    print(f"\nbest hard_mean={best:.1f}  saved to model.pt")
-    # final per-image on real hard set with best model
-    model.load_state_dict(torch.load(os.path.join(HERE, "model.pt")))
+
+    # ---- save a self-describing, versioned checkpoint of the best model ----
+    model.load_state_dict(best_state)
     err, hard, synth = evaluate(model, xr, degs, names)
-    print("\nfinal (best model) per real image:")
+    meta = {
+        "version": args.version,
+        "arch": "HeadingNet",
+        "trained_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "code_hash": code_hash(),
+        "args": {k: getattr(args, k) for k in ("n_train", "epochs", "batch", "seed")},
+        "val": {"hard_mean": round(float(hard.mean()), 2),
+                "hard_median": round(float(np.median(hard)), 2),
+                "hard_within20": int((hard <= 20).sum()), "n_hard": int(len(hard)),
+                "synth_mean": round(float(synth.mean()), 2)},
+    }
+    path = os.path.join(HERE, f"model_v{args.version}.pt")
+    torch.save({"state_dict": best_state, "meta": meta}, path)
+    print(f"\nsaved {os.path.basename(path)}")
+    for k, v in meta.items(): print(f"  {k}: {v}")
+    print("\nfinal (best model) per real hard image:")
     for e, n_ in sorted(zip(err, names), key=lambda z: -z[0]):
         if n_.startswith("hard"):
             print(f"  {n_:28s} err={e:5.1f}")
