@@ -1,0 +1,17 @@
+# Python environment & caches
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+
+# Generated outputs (regenerable by the tools)
+out/
+match_out/
+ship_fragments/
+reconstructed/
+sample_sheet.png
+train.log
+report.html
