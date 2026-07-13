@@ -19,3 +19,6 @@ reconstructed/
 sample_sheet.png
 train.log
 report.html
+
+# keypoint previews (regenerable)
+keypoints_preview.png
