@@ -7,6 +7,10 @@ __pycache__/
 # macOS
 .DS_Store
 
+# Override the user's global ~/.gitignore_global (which ignores README.md):
+# this project keeps its docs in git.
+!README.md
+
 # Generated outputs (regenerable by the tools)
 out/
 match_out/

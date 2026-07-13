@@ -1,0 +1,80 @@
+# Ship heading estimation & de-occlusion
+
+Recover the **heading** of a ship icon in an 80×80 top-down game frame — where the ship
+may be heavily occluded by portraits, village-name text, and minimap markers — and
+reconstruct the whole ship at that heading. Heading is `0° = up (north)`, clockwise.
+
+The repo holds three complementary approaches plus the tooling and datasets.
+
+## Approaches
+
+| approach | where | needs training | best for |
+|---|---|---|---|
+| **Template matcher** | `match_and_reconstruct.py`, `ship_reconstruct/` | no | interpretable; matches a canonical ship to the visible fragment over all 360°, returns ranked heading candidates + confidence. Adds optional occluder-consistency and shape (pointy-in-blob) terms. |
+| **Learned heading CNN** | `ship_heading_model/` | yes (synthetic) | robustness under heavy occlusion — uses whole-frame scene context (water above a tip, occluder position) that the fragment alone can't provide. |
+| **Keypoint detector** *(in progress)* | `keypoint_model/` | yes (synthetic) | detect the ship's distinctive parts (bow tip, stern, sail tips) — each independently fixes direction, so it degrades gracefully and self-reports which features it saw. |
+
+The matcher and the CNN are the reverse of each other: the matcher reasons from the
+fragment's own shape (great when a feature is visible, honest when it isn't); the CNN
+reads the surrounding scene (resolves the ambiguous fragments the shape can't).
+
+## Layout
+
+```
+extract_ship_fragments.py   # extract the visible ship-green fragment as an RGBA cutout
+match_and_reconstruct.py    # fragment -> ranked heading candidates + confidence + reconstruction
+make_report.py              # self-contained HTML report (original / extraction / reconstruction)
+ship_reconstruct/           # standalone deterministic matcher + reconstruction (+ README)
+ship_heading_model/         # CNN heading regressor: datagen / train / infer, versioned model_v*.pt (+ README)
+keypoint_model/             # (in progress) part/keypoint detector
+heading_v9d_raw_images/     # dataset: 12 clean synth_* + 9 occluded hard_*  (80x80, truthNNN labels)
+heading_hard_cases/         # dataset: 22 full 400x190 game frames + metadata.jsonl (hard real cases)
+```
+
+## Setup
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install numpy pillow          # template matcher / extraction / report
+pip install torch                 # only for ship_heading_model / keypoint_model
+```
+
+## Quick start
+
+```bash
+# 1) extract visible ship fragments from the raw frames
+python extract_ship_fragments.py                       # -> ship_fragments/
+
+# 2) template-match each fragment -> heading candidates + reconstruction montage
+python match_and_reconstruct.py ship_fragments/*_fragment.png --out-dir match_out
+
+# 3) HTML report over a folder of full frames (locates ship, extracts, reconstructs, classifies)
+python make_report.py --in-dir heading_hard_cases --out heading_hard_cases/report.html
+
+# 4) learned CNN: predict heading + reconstruct, or validate against the labels
+python ship_heading_model/infer.py --validate
+```
+
+## Results (validation on the 21 labelled `heading_v9d` images)
+
+| | template matcher (shape+occluder) | learned CNN (`model_v1`) |
+|---|---|---|
+| clean `synth_*` (12) | ~0–1° | mean 2.2° |
+| occluded `hard_*` (9) | **7/9** within 20° | **9/9** within 20°, mean 5.3° |
+
+The template matcher labels each case **self-sufficient** (fragment shape fixes the
+heading), **needs scene** (axis clear, bow/stern is a coin-flip), or **underdetermined**
+(too occluded) — see `make_report.py` output. The CNN resolves the "needs scene" cases by
+looking at the whole frame.
+
+## The core finding
+
+Heading recovery is an *information* question, not just an algorithm one. A fragment is
+**self-sufficient** when it contains a directional feature (a pointy bow, a sail tip);
+it **needs an extra bit** (which end is the bow) when only a symmetric blunt piece shows —
+and that bit lives in the scene (the occluder side), not the fragment. There's a ladder of
+increasingly powerful shape cues — *area → outline → oriented-outline → recognized parts* —
+and the keypoint detector (next) is the principled top of that ladder: learn the parts, and
+whichever one survives the occlusion tells you the direction.
+
+Each sub-tool has its own README with details and honest limitations.
