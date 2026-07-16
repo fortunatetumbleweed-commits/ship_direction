@@ -12,7 +12,7 @@ The repo holds three complementary approaches plus the tooling and datasets.
 |---|---|---|---|
 | **Template matcher** | `match_and_reconstruct.py`, `ship_reconstruct/` | no | interpretable; matches a canonical ship to the visible fragment over all 360°, returns ranked heading candidates + confidence. Adds optional occluder-consistency and shape (pointy-in-blob) terms. |
 | **Learned heading CNN** | `ship_heading_model/` | yes (synthetic) | robustness under heavy occlusion — uses whole-frame scene context (water above a tip, occluder position) that the fragment alone can't provide. |
-| **Keypoint detector** *(prototype)* | `keypoint_model/` | yes (synthetic) | detect the ship's distinctive parts (bow, stern, sail-fin tips), then fit the rigid part-constellation to all heatmaps at once. Most interpretable of the three; 1.0° clean, **17.7°, 7/9** on the real occluded set — competitive with the matcher, behind the CNN. See its README. |
+| **Part-based (keypoints → regions)** | `keypoint_model/` | yes (synthetic) | segment the ship into distinctive **parts** (bow / hull / stern / sail_l / sail_r), then fit the rigid part-layout to what's visible. Most interpretable; 0.8° clean, **9.3°, 8/9** on the real occluded set — best of the part-based approaches, fixes the bow/stern flip, just behind the CNN. See its README. |
 
 The matcher and the CNN are the reverse of each other: the matcher reasons from the
 fragment's own shape (great when a feature is visible, honest when it isn't); the CNN
@@ -74,11 +74,13 @@ Heading recovery is an *information* question, not just an algorithm one. A frag
 it **needs an extra bit** (which end is the bow) when only a symmetric blunt piece shows —
 and that bit lives in the scene (the occluder side), not the fragment. There's a ladder of
 increasingly powerful shape cues — *area → outline → oriented-outline → recognized parts* —
-and the keypoint detector is the principled top of that ladder: learn the parts, and
-whichever one survives the occlusion tells you the direction — but only if you enforce that
-the parts form one rigid ship (fit the whole constellation, don't assemble parts
-independently). Doing that lifts it to 17.7°, 7/9 on the real occluded set (competitive with
-the matcher, still behind the CNN); closing the synth→real domain gap is the next lever (see
-`keypoint_model/README.md`).
+and the part-based detector is the principled top of that ladder: learn the parts, and
+whichever survives the occlusion tells you the direction — but only if the parts are
+*distinctive* (whole regions, not ambiguous points) and you enforce that they form one rigid
+ship (fit the whole part-layout, don't assemble parts independently). Doing both — region
+segmentation + a dense part-mask fit — reaches **9.3°, 8/9** on the real occluded set, fixes
+the bow/stern flip nothing else could, and stays fully interpretable (see
+`keypoint_model/README.md`). Only the CNN (9/9) does better, and only on the one frame where
+the ship is too hidden for *any* part to be seen.
 
 Each sub-tool has its own README with details and honest limitations.

@@ -1,25 +1,42 @@
-# Keypoint detector (part-based heading) — prototype
+# Part-based heading (keypoints → regions)
 
-Detect the ship's distinctive **parts** (bow, stern corners, upper/lower sail-fin tips,
-center), then solve the heading from whichever parts survive the occlusion. This is the
-part-based alternative to matching the whole ship or regressing one heading number:
-each feature independently constrains direction, and every detection carries a
-confidence, so the system self-reports *what it saw*.
+Detect the ship's distinctive **parts**, then recover the heading by fitting the rigid
+part-layout to what's visible. Two representations live here, in order of how they evolved:
+
+1. **Point keypoints** (`train.py`, `kp_model_v1.pt`) — 8 point features + a constellation fit.
+2. **Region parts** (`parts_train.py`, `part_model_v1.pt`) — the ship carved into 5 whole
+   regions (bow / hull / stern / sail_l / sail_r) via per-pixel segmentation, then a dense
+   part-mask fit. **This is the better one** — regions are distinctive where points are not.
 
 ```
-image → U-Net → 8 keypoint heatmaps + visibility
-      → constellation_pose (fit the rigid part-constellation to ALL heatmaps at once)
-      → heading → stamp canonical ship
+region model:  image → U-Net → 6-class part segmentation
+             → part_pose (rigid pose whose canonical part-layout best matches the masks)
+             → heading → stamp canonical ship
 ```
 
-## Status: competitive with the template matcher; interpretable
+## Status: region parts are the best part-based approach; interpretable
 
 Results on the 21 real labelled `heading_v9d` images:
 
-| | keypoint `v1` | (for comparison) template matcher | heading CNN |
-|---|---|---|---|
-| clean `synth_*` | **1.0°** | ~0–1° | 2.2° |
-| occluded `hard_*` | **17.7°, 7/9** within 20° | 7/9 | **5.3°, 9/9** |
+| | **region parts** `v1` | point keypoints `v1` | (compare) matcher | heading CNN |
+|---|---|---|---|---|
+| clean `synth_*` | **0.8°** | 1.0° | ~0–1° | 2.2° |
+| occluded `hard_*` | **9.3°, 8/9** | 17.7°, 7/9 | 7/9 | **5.3°, 9/9** |
+
+### Why regions beat points
+A single-pixel keypoint is *locally ambiguous* — a bow tip, a sail tip and a stern corner all
+look like "a green protrusion", so the point model confused them and needed the geometry fit
+just to be usable (and still overfit: `hard` error drifted up after epoch 6). A **region**
+carries distinctive shape and orientation: the stern is a big solid block, the bow a wedge —
+they can't be confused. The segmentation model is **stable** (no overfitting) and fixes the
+bow/stern flip (**t556** 10°) that beat every other method. Only **t082** misses (36° — the
+ship is almost entirely behind the portrait, so only the stern nub shows; one part can't fix
+orientation). This is the culmination of the project: learned occlusion-robust *features* +
+rigid *part geometry*, at the region level.
+
+---
+
+### (History) point-keypoint model — the constellation lesson
 
 ### The key move: fit the constellation, don't assemble parts independently
 
@@ -46,25 +63,35 @@ t082 129°→8°, t542 40°→2°, t084 51°→4°).
   cheap: you know where each part projects).
 - **Reject occluder detections** — supervise the visibility head harder, or add a
   "background/occluder" class so responses on non-ship pixels go to zero.
-- **Denser parts** — the single-pixel keypoints are locally ambiguous; predicting small part
-  *regions* (or dense canonical-coordinate votes) would give more distinctive shape.
+- **Denser parts** — the single-pixel keypoints are locally ambiguous; predicting part
+  *regions* gives distinctive shape. **→ done: the region-parts model above (9.3°, 8/9).**
 
 ## Files
 | file | role |
 |---|---|
-| `keypoints.py`  | 8 canonical keypoints + projection + `solve_pose` + `constellation_pose` |
-| `datagen.py`    | synthetic frames with per-keypoint (x,y) + visibility; heatmap targets |
-| `train.py`      | U-Net (heatmaps + visibility); validates via detect→solve→heading |
-| `infer.py`      | detect + solve + reconstruct; reports which features it saw |
-| `kp_model_v1.pt`| trained weights (self-describing checkpoint) |
-| `keypoints.json`| canonical keypoint coords |
+| **region parts** | |
+| `parts.py`        | 5 canonical part regions + projection + `part_pose` (dense part-mask fit) |
+| `parts_train.py`  | segmentation U-Net (6-class); validates via segment→fit→heading |
+| `parts_infer.py`  | segment + fit + reconstruct; shows the predicted parts |
+| `part_model_v1.pt`| trained weights (self-describing checkpoint) |
+| **point keypoints** | |
+| `keypoints.py`    | 8 canonical keypoints + projection + `solve_pose` + `constellation_pose` |
+| `datagen.py`      | synthetic frames + per-keypoint / per-part labels (shared occluder compositing) |
+| `train.py`        | keypoint U-Net (heatmaps + visibility) |
+| `infer.py`        | keypoint detect + solve + reconstruct |
+| `viz.py`          | regenerate all diagnostic images |
 
 ## Usage
 ```bash
 source ../.venv/bin/activate && pip install torch numpy pillow
-python keypoints.py                     # (re)build canonical keypoints + preview
-python datagen.py                       # labelled sample sheet to eyeball
-python train.py --n-train 20000 --epochs 22   # ~5 min MPS; saves kp_model_v{VERSION}.pt
-python infer.py IMG --out-dir out       # detect + solve + reconstruct
-python infer.py --validate              # heading error via keypoints on the real set
+
+# region parts (recommended)
+python parts.py                              # canonical part regions + verify fit + preview
+python parts_train.py --n-train 20000 --epochs 22   # ~6 min MPS; saves part_model_v{VERSION}.pt
+python parts_infer.py IMG --out-dir out      # segment + fit + reconstruct
+python parts_infer.py --validate             # heading error on the real set
+
+# point keypoints (earlier version)
+python train.py --n-train 20000 --epochs 22 ; python infer.py --validate
+python viz.py                                # regenerate diagnostics
 ```
