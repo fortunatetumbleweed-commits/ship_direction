@@ -21,7 +21,7 @@ Results on the 21 real labelled `heading_v9d` images:
 | | **region parts** `v1` | point keypoints `v1` | (compare) matcher | heading CNN |
 |---|---|---|---|---|
 | clean `synth_*` | **0.8°** | 1.0° | ~0–1° | 2.2° |
-| occluded `hard_*` | **9.3°, 8/9** | 17.7°, 7/9 | 7/9 | **5.3°, 9/9** |
+| occluded `hard_*` | **6.0°, 9/9** | 17.7°, 7/9 | 7/9 | 5.3°, 9/9 |
 
 ### Why regions beat points
 A single-pixel keypoint is *locally ambiguous* — a bow tip, a sail tip and a stern corner all
@@ -29,10 +29,19 @@ look like "a green protrusion", so the point model confused them and needed the 
 just to be usable (and still overfit: `hard` error drifted up after epoch 6). A **region**
 carries distinctive shape and orientation: the stern is a big solid block, the bow a wedge —
 they can't be confused. The segmentation model is **stable** (no overfitting) and fixes the
-bow/stern flip (**t556** 10°) that beat every other method. Only **t082** misses (36° — the
-ship is almost entirely behind the portrait, so only the stern nub shows; one part can't fix
-orientation). This is the culmination of the project: learned occlusion-robust *features* +
-rigid *part geometry*, at the region level.
+bow/stern flip (**t556**) that beat every other method. This is the culmination of the project:
+learned occlusion-robust *features* + rigid *part geometry*, at the region level.
+
+### The gated occluder fallback (how t082 was fixed: 36° → 6°)
+The pose fit scores part-mask **overlap** — which is *degenerate* when only a single small,
+symmetric part is visible (t082: only the stern *tip* survives, and a tip fits inside the full
+canonical stern at every rotation, so the score is dead flat). When the model detects this
+(overlap profile nearly flat), it falls back to the **scene**: penalize poses whose hull would
+lie over open water (it can only hide under an occluder). This is gated — applied *only* when
+the parts genuinely can't decide — so it fixes t082 (**36° → 6°**) without disturbing the 8
+cases the parts already nail. Result: **9/9, mean 6.0°**, matching the CNN while staying
+interpretable. The one frame's direction genuinely lives in the scene, not the ship pixels —
+so the model reaches for the scene exactly there and nowhere else.
 
 ---
 

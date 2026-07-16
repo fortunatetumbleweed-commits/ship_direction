@@ -54,7 +54,8 @@ def main():
     for f in args.images:
         img = np.asarray(Image.open(f).convert("RGB"))
         P, lab = segment(model, img)
-        heading, shift = parts.part_pose(P, L0)
+        _, open_mask = parts.mr.open_mask_from_crop(img.astype(np.int32))
+        heading, shift = parts.part_pose(P, L0, open_mask=open_mask)
         seen = [parts.PART_NAMES[p] for p in range(1, 6) if (lab == p).sum() >= 8]
         # panel: predicted parts | reconstruction
         seg = img // 3

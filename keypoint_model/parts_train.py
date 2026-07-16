@@ -74,7 +74,9 @@ def validate(model, xr, degs, names, L0):
     model.eval(); errs = []
     for b in range(xr.shape[0]):
         P = torch.softmax(model(xr[b:b+1].to(DEVICE)), 1)[0].cpu().numpy()
-        heading, _ = parts.part_pose(P, L0)
+        img = ((xr[b].permute(1, 2, 0).cpu().numpy() + 0.5) * 255).clip(0, 255).astype(np.int32)
+        _, open_mask = parts.mr.open_mask_from_crop(img)        # scene fallback for degenerate poses
+        heading, _ = parts.part_pose(P, L0, open_mask=open_mask)
         errs.append(circ_err(heading, degs[b]))
     errs = np.array(errs)
     hard = np.array([e for e, n in zip(errs, names) if n.startswith("hard")])

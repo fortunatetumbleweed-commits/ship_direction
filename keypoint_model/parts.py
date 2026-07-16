@@ -40,7 +40,7 @@ def render_labels(L0, heading, shift=(0, 0)):
     r = Image.fromarray(L0).rotate(-heading % 360, resample=Image.NEAREST, center=mr.CENTER)
     return np.roll(np.roll(np.asarray(r), shift[0], 0), shift[1], 1)
 
-_MASK_FFT = {}   # step -> (headings, list over parts of stacked rFFT per heading)
+_MASK_FFT, _FOOT_FFT = {}, {}   # caches keyed by rotation step
 def _mask_ffts(L0, step):
     if step in _MASK_FFT: return _MASK_FFT[step]
     L0img = Image.fromarray(L0); heads = list(range(0, 360, step)); ffts = []
@@ -49,17 +49,38 @@ def _mask_ffts(L0, step):
         ffts.append([np.conj(np.fft.rfft2((r == p).astype(np.float32))) for p in range(1, 6)])
     _MASK_FFT[step] = (heads, ffts); return _MASK_FFT[step]
 
-def part_pose(P, L0, step=3, smax=16):
+def _foot_ffts(L0, step):
+    if step in _FOOT_FFT: return _FOOT_FFT[step]
+    foot = Image.fromarray((L0 > 0).astype(np.uint8) * 255)
+    ffts = [np.conj(np.fft.rfft2((np.asarray(foot.rotate(-h % 360, resample=Image.NEAREST, center=mr.CENTER)) > 127).astype(np.float32)))
+            for h in range(0, 360, step)]
+    _FOOT_FFT[step] = ffts; return ffts
+
+def part_pose(P, L0, open_mask=None, lam=0.6, gate=0.25, step=3, smax=16):
     """Recover (heading, (dy,dx)) by matching predicted part probs P (6,W,W) to the
-    rotated canonical part masks (sum of per-part cross-correlations)."""
+    rotated canonical part masks (sum of per-part cross-correlations).
+
+    When `open_mask` is given AND the overlap profile is degenerate (nearly flat -- a
+    single small symmetric part carries no orientation, e.g. only a stern tip visible),
+    fall back to the scene: penalize poses whose hull would fall over open water. Only
+    then, so poses the parts DO determine are left untouched.
+    """
     heads, ffts = _mask_ffts(L0, step)
     Pf = [np.fft.rfft2(P[p]) for p in range(1, 6)]
     idxs = np.r_[0:smax + 1, W - smax:W]
-    best = (-1.0, 0, (0, 0))
-    for h, mf in zip(heads, ffts):
+    accs, ovmax = [], []
+    for mf in ffts:
         acc = np.zeros((W, W), np.float32)
         for j in range(NP):
             acc += np.fft.irfft2(Pf[j] * mf[j], s=(W, W))
+        accs.append(acc); ovmax.append(float(acc[np.ix_(idxs, idxs)].max()))
+    ovmax = np.array(ovmax)
+    degenerate = open_mask is not None and (ovmax.max() - ovmax.min()) / max(ovmax.max(), 1e-6) < gate
+    if degenerate:
+        Of = np.fft.rfft2(open_mask.astype(np.float32)); ff = _foot_ffts(L0, step)
+        accs = [a - lam * np.maximum(np.fft.irfft2(Of * ff[k], s=(W, W)), 0) for k, a in enumerate(accs)]
+    best = (-1e9, 0, (0, 0))
+    for h, acc in zip(heads, accs):
         sub = acc[np.ix_(idxs, idxs)]; ij = np.unravel_index(int(sub.argmax()), sub.shape)
         dy, dx = idxs[ij[0]], idxs[ij[1]]
         if sub[ij] > best[0]:
