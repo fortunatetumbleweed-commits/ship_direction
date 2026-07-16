@@ -96,6 +96,35 @@ def solve_pose(detected, conf, canon, conf_th=0.3, min_pts=2):
     tx, ty = wb[0] - rax, wb[1] - ray                                             # translation = C + shift
     return heading, (ty - cy, tx - cx), len(names)
 
+def constellation_pose(H, conf, canon, step=2, smax=16):
+    """Geometry-aware pose from keypoint heatmaps: search the single rigid pose whose
+    projected keypoint constellation best explains ALL the heatmaps at once (each part
+    weighted by its confidence). This enforces that the parts form one ship -- a spurious
+    peak in one channel can't win unless every other keypoint also lines up under the same
+    pose. Far more robust than argmax-per-keypoint on noisy real heatmaps.
+
+    H: (K, W, W) heatmaps; conf: (K,) visibility. Returns (heading_deg, (dy, dx)).
+    """
+    K, Wd = H.shape[0], H.shape[1]
+    Hw = H * np.asarray(conf, np.float32).reshape(K, 1, 1)
+    idxs = np.r_[0:smax + 1, Wd - smax:Wd]
+    def score(hd):
+        proj = project(canon, hd, (0, 0)); acc = np.zeros((Wd, Wd), np.float32)
+        for k, nm in enumerate(KP_NAMES):
+            px, py = proj[nm]
+            acc += np.roll(np.roll(Hw[k], -int(round(py)), 0), -int(round(px)), 1)
+        sub = acc[np.ix_(idxs, idxs)]; ij = np.unravel_index(int(sub.argmax()), sub.shape)
+        dy, dx = idxs[ij[0]], idxs[ij[1]]
+        return float(sub[ij]), (dy - Wd if dy > smax else dy, dx - Wd if dx > smax else dx)
+    best = (-1.0, 0, (0, 0))
+    for hd in range(0, 360, step):
+        v, sh = score(hd)
+        if v > best[0]: best = (v, hd, sh)
+    for hd in range(best[1] - step, best[1] + step + 1):     # refine to 1 deg
+        v, sh = score(hd % 360)
+        if v > best[0]: best = (v, hd % 360, sh)
+    return best[1], best[2]
+
 def load():
     """Return (canonical_mask bool, canonical colored sprite uint8, keypoints dict)."""
     sprite, cmask = mr.build_canonical()

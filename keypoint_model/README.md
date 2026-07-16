@@ -7,47 +7,52 @@ each feature independently constrains direction, and every detection carries a
 confidence, so the system self-reports *what it saw*.
 
 ```
-image → U-Net → 8 keypoint heatmaps + visibility → confident keypoints
-      → solve_pose (2-D rigid fit) → heading → stamp canonical ship
+image → U-Net → 8 keypoint heatmaps + visibility
+      → constellation_pose (fit the rigid part-constellation to ALL heatmaps at once)
+      → heading → stamp canonical ship
 ```
 
-## Status: promising concept, first model underperforms — needs work
+## Status: competitive with the template matcher; interpretable
 
-Honest results on the 21 real labelled `heading_v9d` images:
+Results on the 21 real labelled `heading_v9d` images:
 
-| | keypoint model `v1` | (for comparison) template matcher | heading CNN |
+| | keypoint `v1` | (for comparison) template matcher | heading CNN |
 |---|---|---|---|
-| clean `synth_*` | **1.2°** | ~0–1° | 2.2° |
-| occluded `hard_*` | **35.9°, 4/9** within 20° | 7/9 | **5.3°, 9/9** |
+| clean `synth_*` | **1.0°** | ~0–1° | 2.2° |
+| occluded `hard_*` | **17.7°, 7/9** within 20° | 7/9 | **5.3°, 9/9** |
 
-The building blocks are verified and strong:
-- **Pose solver is exact** — 0.00° from all keypoints, ~1.3° median from just 2 noisy ones.
-- **Clean-image detection is excellent** — 1.2°, so the model localizes parts well when it sees them.
+### The key move: fit the constellation, don't assemble parts independently
 
-But it **generalizes poorly to the real occluded frames** (35.9° vs the CNN's 5.3°). Two
-causes, both visible in the training log and detections:
-1. **Domain gap** — on real frames the detector places keypoints *on the occluders*
-   (portrait, "Village" text, diamonds); the visibility head fails to suppress them
-   because the synthetic occluders don't match the real ones closely enough. Precise
-   localization is far more sensitive to this gap than the CNN's holistic heading readout.
-2. **Overfitting** — `synth` error stayed ~1° while `hard` error *worsened* after epoch 6
-   (best model is early). The net memorized synthetic keypoint appearance.
+The parts have only **3 degrees of freedom** (heading + x/y), not 16 — they can't be placed
+independently. Taking each heatmap's argmax and solving from those points fails on real
+frames: locally a bow tip, sail tip, and stern corner all look like "a green protrusion", so
+the model puts, say, *bow* on a sail tip, and the pose solve gets inconsistent points
+(**35.9°, 4/9**). Instead, `constellation_pose` searches for the single rigid pose whose
+projected keypoint constellation best explains **all** the heatmaps at once, each part
+weighted by its confidence. A spurious peak can't win unless every other part also lines up
+under the same pose. Same weights, no retraining — **35.9° → 17.7°, 4/9 → 7/9** (e.g.
+t082 129°→8°, t542 40°→2°, t084 51°→4°).
 
-So the architecture is sound (and it's the most interpretable of the three — you can see
-which parts it found), but as a heading estimator this first cut does **not** beat the CNN.
+### Honest limits
+- **Clean detection is excellent (1.0°)** and the constellation fit is robust, but 2 real
+  cases still miss: t083 (a 29-px sliver — too little to detect any part) and t556 (a
+  bow/stern flip the near-symmetric heatmaps resolve the wrong way).
+- **Domain gap remains** — the heatmaps still leak onto real occluders the synthetic ones
+  don't cover; the constellation fit tolerates it but doesn't remove it.
 
-## To make it competitive
-- **Close the domain gap** (the main lever): stronger appearance augmentation (color/blur),
-  a wider/real occluder library, and — best — mix in real `(frame, keypoints)` exports from
-  the game (keypoint labels are cheap: you know where each part projects).
-- **Regularize** — dropout + weight decay + early stopping (v1 already overfits by ep ~6).
+## To push further
+- **Close the domain gap** (main lever): stronger appearance augmentation, a wider/real
+  occluder library, and best — real `(frame, keypoints)` exports from the game (labels are
+  cheap: you know where each part projects).
 - **Reject occluder detections** — supervise the visibility head harder, or add a
-  "background/occluder" class so keypoints on non-ship pixels are pushed down.
+  "background/occluder" class so responses on non-ship pixels go to zero.
+- **Denser parts** — the single-pixel keypoints are locally ambiguous; predicting small part
+  *regions* (or dense canonical-coordinate votes) would give more distinctive shape.
 
 ## Files
 | file | role |
 |---|---|
-| `keypoints.py`  | 8 canonical keypoints + projection + `solve_pose` (all verified) |
+| `keypoints.py`  | 8 canonical keypoints + projection + `solve_pose` + `constellation_pose` |
 | `datagen.py`    | synthetic frames with per-keypoint (x,y) + visibility; heatmap targets |
 | `train.py`      | U-Net (heatmaps + visibility); validates via detect→solve→heading |
 | `infer.py`      | detect + solve + reconstruct; reports which features it saw |

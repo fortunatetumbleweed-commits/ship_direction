@@ -12,7 +12,7 @@ The repo holds three complementary approaches plus the tooling and datasets.
 |---|---|---|---|
 | **Template matcher** | `match_and_reconstruct.py`, `ship_reconstruct/` | no | interpretable; matches a canonical ship to the visible fragment over all 360°, returns ranked heading candidates + confidence. Adds optional occluder-consistency and shape (pointy-in-blob) terms. |
 | **Learned heading CNN** | `ship_heading_model/` | yes (synthetic) | robustness under heavy occlusion — uses whole-frame scene context (water above a tip, occluder position) that the fragment alone can't provide. |
-| **Keypoint detector** *(prototype)* | `keypoint_model/` | yes (synthetic) | detect the ship's distinctive parts (bow, stern, sail-fin tips) — each independently fixes direction, most interpretable of the three. Concept verified (exact pose solver, 1.2° clean detection) but `v1` overfits / hits a domain gap on real frames (35.9°, 4/9) — see its README. |
+| **Keypoint detector** *(prototype)* | `keypoint_model/` | yes (synthetic) | detect the ship's distinctive parts (bow, stern, sail-fin tips), then fit the rigid part-constellation to all heatmaps at once. Most interpretable of the three; 1.0° clean, **17.7°, 7/9** on the real occluded set — competitive with the matcher, behind the CNN. See its README. |
 
 The matcher and the CNN are the reverse of each other: the matcher reasons from the
 fragment's own shape (great when a feature is visible, honest when it isn't); the CNN
@@ -75,9 +75,10 @@ it **needs an extra bit** (which end is the bow) when only a symmetric blunt pie
 and that bit lives in the scene (the occluder side), not the fragment. There's a ladder of
 increasingly powerful shape cues — *area → outline → oriented-outline → recognized parts* —
 and the keypoint detector is the principled top of that ladder: learn the parts, and
-whichever one survives the occlusion tells you the direction. Its pieces are verified (an
-exact pose solver; 1.2° detection on clean ships), but the first trained model doesn't yet
-beat the CNN on real occluded frames — it overfits the synthetic distribution and needs the
-domain gap closed (see `keypoint_model/README.md`).
+whichever one survives the occlusion tells you the direction — but only if you enforce that
+the parts form one rigid ship (fit the whole constellation, don't assemble parts
+independently). Doing that lifts it to 17.7°, 7/9 on the real occluded set (competitive with
+the matcher, still behind the CNN); closing the synth→real domain gap is the next lever (see
+`keypoint_model/README.md`).
 
 Each sub-tool has its own README with details and honest limitations.

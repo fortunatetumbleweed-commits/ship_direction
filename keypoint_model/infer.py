@@ -12,7 +12,7 @@ import torch
 from PIL import Image, ImageDraw
 import keypoints as kp
 import match_and_reconstruct as mr
-from train import KeypointNet, to_tensor, detect, load_real, validate, circ_err, DEVICE, W
+from train import KeypointNet, to_tensor, detect, heatmaps_conf, load_real, validate, circ_err, DEVICE, W
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 COLORS = {"bow": (255, 60, 60), "stern_l": (80, 160, 255), "stern_r": (80, 220, 255),
@@ -63,12 +63,10 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
     for f in args.images:
         img = np.asarray(Image.open(f).convert("RGB"))
-        det, conf = detect(model, to_tensor(img[None]))[0]
-        r = kp.solve_pose(det, conf, canon)
+        hm, cf = heatmaps_conf(model, to_tensor(img[None]))
+        heading, shift = kp.constellation_pose(hm[0], cf[0], canon)
+        det, conf = detect(model, to_tensor(img[None]))[0]     # peak points, for the overlay
         seen = [n for n in kp.KP_NAMES if conf[n] >= 0.3]
-        if r is None:
-            print(f"{os.path.basename(f):28s} no pose ({len(seen)} kps seen)"); continue
-        heading, shift, nused = r
         reconstruct(sprite, img, heading, shift, det, conf).save(
             os.path.join(args.out_dir, os.path.splitext(os.path.basename(f))[0] + "_kp.png"))
         print(f"{os.path.basename(f):28s} heading={heading:6.1f}  seen: {', '.join(seen)}")

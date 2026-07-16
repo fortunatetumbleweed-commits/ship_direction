@@ -83,12 +83,16 @@ def load_real():
     return to_tensor(np.stack(imgs)), np.array(degs), names
 
 @torch.no_grad()
+def heatmaps_conf(model, x):
+    """x: (B,3,80,80) -> (heatmaps (B,K,W,W) np, conf (B,K) np)."""
+    heat, vislog = model(x.to(DEVICE))
+    return heat.cpu().numpy(), torch.sigmoid(vislog).cpu().numpy()
+
+@torch.no_grad()
 def detect(model, x):
-    """x: (B,3,80,80) -> list of (det{name:(x,y)}, conf{name:float}) per image."""
-    heat, vislog = model(x.to(DEVICE)); conf = torch.sigmoid(vislog)
-    B = x.shape[0]; out = []
-    hm = heat.cpu().numpy(); cf = conf.cpu().numpy()
-    for b in range(B):
+    """x: (B,3,80,80) -> list of (det{name:(x,y)}, conf{name:float}) per image (argmax)."""
+    hm, cf = heatmaps_conf(model, x); out = []
+    for b in range(x.shape[0]):
         det, cc = {}, {}
         for i, nm in enumerate(kp.KP_NAMES):
             iy, ix = np.unravel_index(int(hm[b, i].argmax()), (W, W))
@@ -98,10 +102,11 @@ def detect(model, x):
 
 @torch.no_grad()
 def validate(model, xr, degs, names, canon):
-    model.eval(); dets = detect(model, xr); errs = []
-    for (det, conf), truth in zip(dets, degs):
-        r = kp.solve_pose(det, conf, canon)
-        errs.append(circ_err(r[0], truth) if r else 180.0)
+    """Heading via the geometry-aware constellation fit over the heatmaps."""
+    model.eval(); hm, cf = heatmaps_conf(model, xr); errs = []
+    for b, truth in enumerate(degs):
+        heading, _ = kp.constellation_pose(hm[b], cf[b], canon)
+        errs.append(circ_err(heading, truth))
     errs = np.array(errs)
     hard = np.array([e for e, n in zip(errs, names) if n.startswith("hard")])
     synth = np.array([e for e, n in zip(errs, names) if n.startswith("synth")])
