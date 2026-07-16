@@ -18,10 +18,12 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "ship_heading_model"))
 import match_and_reconstruct as mr
-import datagen as hdg                    # occluder compositing (backgrounds, portrait, text, icons)
 import keypoints as kp
+import importlib.util                     # load the heading model's datagen under a distinct
+_spec = importlib.util.spec_from_file_location(  # name (both files are called datagen.py)
+    "heading_datagen", os.path.join(ROOT, "ship_heading_model", "datagen.py"))
+hdg = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(hdg)  # occluder compositing
 
 W = mr.W
 K = len(kp.KP_NAMES)
