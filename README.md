@@ -12,7 +12,7 @@ The repo holds three complementary approaches plus the tooling and datasets.
 |---|---|---|---|
 | **Template matcher** | `match_and_reconstruct.py`, `ship_reconstruct/` | no | interpretable; matches a canonical ship to the visible fragment over all 360°, returns ranked heading candidates + confidence. Adds optional occluder-consistency and shape (pointy-in-blob) terms. |
 | **Learned heading CNN** | `ship_heading_model/` | yes (synthetic) | robustness under heavy occlusion — uses whole-frame scene context (water above a tip, occluder position) that the fragment alone can't provide. |
-| **Keypoint detector** *(in progress)* | `keypoint_model/` | yes (synthetic) | detect the ship's distinctive parts (bow tip, stern, sail tips) — each independently fixes direction, so it degrades gracefully and self-reports which features it saw. |
+| **Keypoint detector** *(prototype)* | `keypoint_model/` | yes (synthetic) | detect the ship's distinctive parts (bow, stern, sail-fin tips) — each independently fixes direction, most interpretable of the three. Concept verified (exact pose solver, 1.2° clean detection) but `v1` overfits / hits a domain gap on real frames (35.9°, 4/9) — see its README. |
 
 The matcher and the CNN are the reverse of each other: the matcher reasons from the
 fragment's own shape (great when a feature is visible, honest when it isn't); the CNN
@@ -74,7 +74,10 @@ Heading recovery is an *information* question, not just an algorithm one. A frag
 it **needs an extra bit** (which end is the bow) when only a symmetric blunt piece shows —
 and that bit lives in the scene (the occluder side), not the fragment. There's a ladder of
 increasingly powerful shape cues — *area → outline → oriented-outline → recognized parts* —
-and the keypoint detector (next) is the principled top of that ladder: learn the parts, and
-whichever one survives the occlusion tells you the direction.
+and the keypoint detector is the principled top of that ladder: learn the parts, and
+whichever one survives the occlusion tells you the direction. Its pieces are verified (an
+exact pose solver; 1.2° detection on clean ships), but the first trained model doesn't yet
+beat the CNN on real occluded frames — it overfits the synthetic distribution and needs the
+domain gap closed (see `keypoint_model/README.md`).
 
 Each sub-tool has its own README with details and honest limitations.
