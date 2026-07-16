@@ -2,12 +2,14 @@
 Keypoint definitions for the ship, in the canonical frame (heading 0 = bow up).
 
 The ship has distinctive parts, each of which independently indicates direction:
-  bow      - the pointy nose (points in the heading direction)
-  stern_l  - left corner of the flat transom (back)
-  stern_r  - right corner of the flat transom
-  sail_l   - left sail/fin tip sticking out past the hull
-  sail_r   - right sail/fin tip
-  center   - hull centroid (position anchor; not directional on its own)
+  bow       - the pointy nose (points in the heading direction)
+  stern_l   - left corner of the flat transom (back)
+  stern_r   - right corner of the flat transom
+  fin_up_l  - upper sail/fin tip, left  (forward pair)
+  fin_up_r  - upper sail/fin tip, right
+  fin_lo_l  - lower sail/fin tip, left   (widest pair)
+  fin_lo_r  - lower sail/fin tip, right
+  center    - hull centroid (position anchor; not directional on its own)
 
 Keypoints are extracted geometrically from the canonical ship mask, then can be
 projected to any (heading, shift) pose to make training targets or to solve pose
@@ -24,7 +26,7 @@ sys.path.insert(0, os.path.dirname(HERE))           # repo root, for match_and_r
 import match_and_reconstruct as mr                  # build_canonical, render, W, CENTER
 
 W = mr.W
-KP_NAMES = ["bow", "stern_l", "stern_r", "sail_l", "sail_r", "center"]
+KP_NAMES = ["bow", "stern_l", "stern_r", "fin_up_l", "fin_up_r", "fin_lo_l", "fin_lo_r", "center"]
 
 def canonical_keypoints(mask):
     """Extract keypoint (x, y) coords from the canonical ship mask (heading 0, bow up)."""
@@ -40,12 +42,23 @@ def canonical_keypoints(mask):
     sxs, sys_ = xs[sm], ys[sm]
     stern_l = (float(sxs.min()), float(sys_[sxs.argmin()]))
     stern_r = (float(sxs.max()), float(sys_[sxs.argmax()]))
-    # sail/fin tips: global horizontal extremes
-    sail_l = (float(xs.min()), float(ys[xs.argmin()]))
-    sail_r = (float(xs.max()), float(ys[xs.argmax()]))
+    # fin/sail tips: two lateral protrusions (upper + lower). Find the two rows of
+    # peak half-width, and place the left/right tip at each row's horizontal extremes.
+    rows = [r for r in range(top, bot + 1) if (ys == r).any()]
+    minx = {r: int(xs[ys == r].min()) for r in rows}
+    maxx = {r: int(xs[ys == r].max()) for r in rows}
+    ext = {r: (maxx[r] - minx[r]) / 2 for r in rows}
+    peaks = [r for r in rows if ext[r] >= ext.get(r - 1, -1) and ext[r] >= ext.get(r + 1, -1)]
+    peaks.sort(key=lambda r: -ext[r]); sel = []
+    for r in peaks:
+        if all(abs(r - s) >= 5 for s in sel): sel.append(r)
+        if len(sel) == 2: break
+    up, lo = sorted(sel)                             # upper (smaller y) then lower
     center = (float(xs.mean()), float(ys.mean()))
     return {"bow": (bx, by), "stern_l": stern_l, "stern_r": stern_r,
-            "sail_l": sail_l, "sail_r": sail_r, "center": center}
+            "fin_up_l": (float(minx[up]), float(up)), "fin_up_r": (float(maxx[up]), float(up)),
+            "fin_lo_l": (float(minx[lo]), float(lo)), "fin_lo_r": (float(maxx[lo]), float(lo)),
+            "center": center}
 
 def project(kps, heading, shift=(0, 0)):
     """Rotate canonical keypoints to `heading` (0=up, cw) about CENTER, then translate."""
@@ -72,7 +85,8 @@ if __name__ == "__main__":
     for k in KP_NAMES: print(f"  {k:8s} ({kps[k][0]:5.1f}, {kps[k][1]:5.1f})")
 
     COLORS = {"bow": (255, 60, 60), "stern_l": (80, 160, 255), "stern_r": (80, 220, 255),
-              "sail_l": (255, 220, 40), "sail_r": (255, 160, 40), "center": (200, 200, 200)}
+              "fin_up_l": (255, 230, 40), "fin_up_r": (255, 170, 40),
+              "fin_lo_l": (150, 255, 80), "fin_lo_r": (60, 210, 120), "center": (210, 210, 210)}
     def fnt(s=11):
         try: return ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial Bold.ttf", s)
         except Exception: return ImageFont.load_default()
