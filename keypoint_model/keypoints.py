@@ -72,6 +72,30 @@ def project(kps, heading, shift=(0, 0)):
         out[name] = (cx + rx + shift[1], cy + ry + shift[0])
     return out
 
+def solve_pose(detected, conf, canon, conf_th=0.3, min_pts=2):
+    """Recover (heading, shift) from detected keypoints by a weighted 2-D rigid fit
+    of the canonical constellation to the detected points. Needs >=2 confident,
+    non-coincident keypoints. Returns (heading_deg, (dy, dx), n_used) or None.
+    """
+    cx, cy = mr.CENTER
+    names = [n for n in canon if conf.get(n, 0.0) >= conf_th and n in detected]
+    if len(names) < min_pts:
+        return None
+    w = np.array([conf[n] for n in names], float)
+    a = np.array([[canon[n][0] - cx, canon[n][1] - cy] for n in names], float)   # canonical, centered
+    b = np.array([list(detected[n]) for n in names], float)                       # detected (image)
+    wa, wb = (w[:, None] * a).sum(0) / w.sum(), (w[:, None] * b).sum(0) / w.sum()
+    a0, b0 = a - wa, b - wb
+    if (w * (a0[:, 0] ** 2 + a0[:, 1] ** 2)).sum() < 1e-6:
+        return None                                                               # points coincide
+    c = (w * (a0[:, 0] * b0[:, 0] + a0[:, 1] * b0[:, 1])).sum()
+    s = (w * (a0[:, 0] * b0[:, 1] - a0[:, 1] * b0[:, 0])).sum()
+    heading = math.degrees(math.atan2(s, c)) % 360
+    ca, sa = math.cos(math.radians(heading)), math.sin(math.radians(heading))
+    rax, ray = ca * wa[0] - sa * wa[1], sa * wa[0] + ca * wa[1]                    # R * canonical-centroid
+    tx, ty = wb[0] - rax, wb[1] - ray                                             # translation = C + shift
+    return heading, (ty - cy, tx - cx), len(names)
+
 def load():
     """Return (canonical_mask bool, canonical colored sprite uint8, keypoints dict)."""
     sprite, cmask = mr.build_canonical()

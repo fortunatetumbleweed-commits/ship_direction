@@ -21,4 +21,4 @@ train.log
 report.html
 
 # keypoint previews (regenerable)
-keypoints_preview.png
+*_preview.png
