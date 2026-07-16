@@ -17,7 +17,7 @@ match_out/
 ship_fragments/
 reconstructed/
 sample_sheet.png
-train.log
+*.log
 report.html
 
 # keypoint previews (regenerable)
