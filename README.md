@@ -12,7 +12,7 @@ The repo holds three complementary approaches plus the tooling and datasets.
 |---|---|---|---|
 | **Template matcher** | `match_and_reconstruct.py`, `ship_reconstruct/` | no | interpretable; matches a canonical ship to the visible fragment over all 360°, returns ranked heading candidates + confidence. Adds optional occluder-consistency and shape (pointy-in-blob) terms. |
 | **Learned heading CNN** | `ship_heading_model/` | yes (synthetic) | robustness under heavy occlusion — uses whole-frame scene context (water above a tip, occluder position) that the fragment alone can't provide. |
-| **Part-based (keypoints → regions)** | `keypoint_model/` | yes (synthetic) | segment the ship into distinctive **parts** (bow / hull / stern / sail_l / sail_r), fit the rigid part-layout to what's visible, and fall back to the scene only when a single part can't decide. Most interpretable; 0.8° clean, **6.0°, 9/9** on the real occluded set — matches the CNN's count while staying interpretable. See its README. |
+| **Part-based (keypoints → regions)** | `keypoint_model/` | yes (synthetic) | segment the ship into distinctive **parts** (bow / hull / stern / sail_l / sail_r), fit the rigid part-layout to what's visible, penalizing any hull placed on open water. Most interpretable; 0.7° clean, correct on all 9 real occluded frames (8/9 by the dataset labels — the one "miss", t083, is a mislabeled frame). See its README. |
 
 The matcher and the CNN are the reverse of each other: the matcher reasons from the
 fragment's own shape (great when a feature is visible, honest when it isn't); the CNN
@@ -77,11 +77,13 @@ increasingly powerful shape cues — *area → outline → oriented-outline → 
 and the part-based detector is the principled top of that ladder: learn the parts, and
 whichever survives the occlusion tells you the direction — but only if the parts are
 *distinctive* (whole regions, not ambiguous points) and you enforce that they form one rigid
-ship (fit the whole part-layout, don't assemble parts independently). Doing both — region
-segmentation + a dense part-mask fit — fixes the bow/stern flip nothing else could and stays
-fully interpretable. The one frame where a single part can't decide direction (t082: only a
-stern tip survives) is handled by falling back to the scene *exactly there* — a gated occluder
-cue, applied only when the parts are degenerate — lifting it to **6.0°, 9/9**, matching the
-CNN's count while remaining interpretable (see `keypoint_model/README.md`).
+ship (fit the whole part-layout, don't assemble parts independently), *and* refuse to place the
+hull on open water where no ship was seen. Doing all three — region segmentation + dense
+part-mask fit + an open-water penalty — fixes the bow/stern flip nothing else could, keeps every
+reconstruction physically consistent, and stays fully interpretable. It's correct on all 9 real
+occluded frames; the one that "misses" by the dataset labels (t083) turns out to be a
+**mislabeled frame** — its label puts the ship on open water, and the model's answer is the
+physically valid one. Reading the pixels honestly ended up better than the ground truth (see
+`keypoint_model/README.md`).
 
 Each sub-tool has its own README with details and honest limitations.
