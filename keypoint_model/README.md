@@ -105,7 +105,11 @@ t082 129°→8°, t542 40°→2°, t084 51°→4°).
 | `parts.py`        | 5 canonical part regions + projection + `part_pose` (dense part-mask fit) |
 | `parts_train.py`  | segmentation U-Net (6-class); validates via segment→fit→heading |
 | `parts_infer.py`  | segment + fit + reconstruct; shows the predicted parts |
+| `parts_viz.py`    | regenerate `parts_features.png` (input \| predicted parts \| reconstruction panel) |
 | `part_model_v1.pt`| trained weights (self-describing checkpoint) |
+| `parts_preview.png`   | how the 5 parts are **defined** (canonical regions at several headings) — from `parts.py` |
+| `parts_features.png`  | how the **matching** works, over clean + occluded frames — from `parts_viz.py` |
+| `parts_features_pre_t083fix.png` | kept for history: the earlier panel, when t083 still read the wrong 210-ish heading |
 | **point keypoints** | |
 | `keypoints.py`    | 8 canonical keypoints + projection + `solve_pose` + `constellation_pose` |
 | `datagen.py`      | synthetic frames + per-keypoint / per-part labels (shared occluder compositing) |
@@ -122,6 +126,7 @@ python parts.py                              # canonical part regions + verify f
 python parts_train.py --n-train 20000 --epochs 22   # ~6 min MPS; saves part_model_v{VERSION}.pt
 python parts_infer.py IMG --out-dir out      # segment + fit + reconstruct
 python parts_infer.py --validate             # heading error on the real set
+python parts_viz.py                          # regenerate parts_features.png (the matching panel)
 
 # point keypoints (earlier version)
 python train.py --n-train 20000 --epochs 22 ; python infer.py --validate

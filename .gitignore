@@ -27,3 +27,9 @@ report.html
 kp_*.png
 feature_*.png
 parts_*.png
+
+# ...but keep the key region-parts diagnostics that shaped the work:
+#   how the parts are defined, how the matching works, and the pre-fix t083 issue
+!parts_preview.png
+!parts_features.png
+!parts_features_pre_t083fix.png
