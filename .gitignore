@@ -26,4 +26,4 @@ report.html
 # keypoint diagnostic images (regenerate with keypoint_model/viz.py)
 kp_*.png
 feature_*.png
-parts_result.png
+parts_*.png
