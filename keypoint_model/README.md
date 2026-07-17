@@ -24,8 +24,9 @@ Results on the 21 real labelled `heading_v9d` images:
 | occluded `hard_*` | **8/9 by labels (9/9 physically)** | 17.7°, 7/9 | 7/9 | 5.3°, 9/9 |
 
 > The one label-miss is **t083**, whose `truth210` label is **wrong** — it places the ship on
-> open water (physically impossible). The model's answer (~150°, SSE) is physically consistent
-> and matches a human read of the frame. So the model is correct on all 9; one dataset label is not.
+> open water (physically impossible). The model's answer (**174°**, ~S/SSE) covers 100% of the
+> visible ship with minimal spill and matches a human read of the frame. So the model is correct
+> on all 9; one dataset label is not.
 
 ### Why regions beat points
 A single-pixel keypoint is *locally ambiguous* — a bow tip, a sail tip and a stern corner all
@@ -36,24 +37,30 @@ they can't be confused. The segmentation model is **stable** (no overfitting) an
 bow/stern flip (**t556**) that beat every other method. This is the culmination of the project:
 learned occlusion-robust *features* + rigid *part geometry*, at the region level.
 
-### The open-water (phantom) penalty — a core scoring term
-`part_pose` scores part-mask **overlap**, which only rewards *covering* what's visible — it
-never penalizes the reconstructed ship spilling onto **open water where no ship was seen**,
-which is impossible (the hull would be visible there). Overlap alone is also degenerate when
-only a tiny fragment shows (it fits under the full ship at *any* angle → coverage is 100%
-everywhere). So the fit subtracts a penalty for footprint over open water (True where the crop
-is neither ship nor occluder). This is a **precision** term paired with the overlap **recall**
-term, applied always — not a special case:
-- **t082** (only a stern tip visible, overlap dead-flat): the penalty is the only signal, and it
-  points the hull *under the portrait* → **36° → 6°**.
-- **t083**: overlap put the stern nub out on open water (168 phantom px); the penalty pulls the
-  ship back onto the visible pixels (49 phantom px) → heading ~150° (SSE). Its `210` label is
-  the physically-impossible one here, so this reads as a "miss" only against a bad label.
+### `part_pose` scoring: three terms
+Part-mask overlap alone only rewards *covering the predicted parts* — it's sensitive to
+segmentation errors, and degenerate when a tiny fragment fits under the full ship at any angle
+(coverage 100% everywhere). So the fit adds two pixel-grounded terms that don't depend on the
+(error-prone) part labels:
 
-Net: reconstructions are **physically consistent** (the ship never sits on open water), clean
-synth stays 0.7°, and the model is correct on all 9 real frames — one of which the dataset
-mislabels. This is the culmination: learned occlusion-robust *features* + rigid *part geometry*
-+ a *scene-consistency* term, at the region level.
+1. **part overlap** (recall on labels) — the interpretable core.
+2. **visible-green coverage** (recall on pixels) — reward the footprint covering the *actual*
+   visible ship-green. Ground-truth pixels, so it's robust when a part is mislabeled.
+3. **open-water penalty** (precision) — the hull may not lie on open water (crop pixels that
+   are neither ship nor occluder); it would be visible there.
+
+What each fixes:
+- **t082** (only a stern tip, overlap dead-flat): the open-water term is the only signal and
+  points the hull under the portrait → **36° → 6°**.
+- **t083**: the segmentation mislabels a sail sliver as stern, tugging overlap to a pose that
+  spills the ship onto water. The green-coverage + open-water terms re-anchor to the real
+  pixels → **174°** (~S/SSE), 100% green covered, minimal spill — matching a human read. Its
+  `210` label is the physically-impossible one, so this reads as a "miss" only against a bad label.
+
+Net: reconstructions are **physically consistent** (never on open water), clean synth stays
+0.7°, and the model is correct on all 9 real frames — one of which the dataset mislabels. This is
+the culmination: learned occlusion-robust *features* + rigid *part geometry* + *pixel/scene
+consistency*, at the region level.
 
 ---
 

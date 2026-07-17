@@ -21,6 +21,11 @@ PART_NAMES = ["bg", "bow", "hull", "stern", "sail_l", "sail_r"]   # index 0..5
 NP = 5                                                            # ship parts (1..5)
 STERN_Y, SAIL_T = 44, 4.0
 
+def ship_green(rgb):
+    """Strict visible ship-green mask (bright, saturated green; rejects grass)."""
+    a = np.asarray(rgb).astype(np.int32); r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    return (g > 110) & (g - r > 60) & (g - b > 50)
+
 def canonical_parts():
     """Return an (W,W) uint8 part-label map of the canonical ship (0=bg, 1..5=parts)."""
     cmask, _, _ = kp.load()
@@ -56,30 +61,32 @@ def _foot_ffts(L0, step):
             for h in range(0, 360, step)]
     _FOOT_FFT[step] = ffts; return ffts
 
-def part_pose(P, L0, open_mask=None, lam=0.4, step=3, smax=16):
-    """Recover (heading, (dy,dx)) by matching predicted part probs P (6,W,W) to the
-    rotated canonical part masks (sum of per-part cross-correlations), minus a penalty
-    for the reconstructed hull lying over open water.
+def part_pose(P, L0, open_mask=None, ship_mask=None, lam=0.4, beta=1.0, step=3, smax=16):
+    """Recover (heading, (dy,dx)) for the ship. Three scoring terms:
 
-    The overlap term alone only rewards *covering* visible parts -- it never penalizes the
-    ship spilling onto water where no ship was seen, which is impossible (it would be
-    visible). So when `open_mask` is given (True where open water/terrain, i.e. not ship
-    and not occluder), poses whose footprint falls on open water are penalized. This is a
-    core precision term, not a fallback: a reconstruction over open water is wrong even
-    when the coverage is perfect (e.g. a tiny fragment fits under the ship at any angle).
+    - part overlap (recall on labels): predicted part probs vs the rotated canonical part
+      masks -- the interpretable core, but sensitive to segmentation errors.
+    - `ship_mask` (recall on pixels): reward the reconstructed footprint covering the ACTUAL
+      visible ship-green. Uses ground-truth pixels, so it's robust when a part is mislabeled.
+    - `open_mask` (precision): penalize the footprint over open water (not ship, not occluder)
+      -- the hull can't be on visible water, it would be seen. Also breaks the degeneracy where
+      a tiny fragment fits under the full ship at any angle (overlap alone is flat there).
     """
     heads, ffts = _mask_ffts(L0, step)
     Pf = [np.fft.rfft2(P[p]) for p in range(1, 6)]
     idxs = np.r_[0:smax + 1, W - smax:W]
     Of = np.fft.rfft2(open_mask.astype(np.float32)) if open_mask is not None else None
-    ff = _foot_ffts(L0, step) if open_mask is not None else None
+    Gf = np.fft.rfft2(ship_mask.astype(np.float32)) if ship_mask is not None else None
+    ff = _foot_ffts(L0, step) if (Of is not None or Gf is not None) else None
     best = (-1e9, 0, (0, 0))
     for k, (h, mf) in enumerate(zip(heads, ffts)):
         acc = np.zeros((W, W), np.float32)
         for j in range(NP):
             acc += np.fft.irfft2(Pf[j] * mf[j], s=(W, W))
+        if Gf is not None:
+            acc += beta * np.maximum(np.fft.irfft2(Gf * ff[k], s=(W, W)), 0)     # footprint covers visible green
         if Of is not None:
-            acc -= lam * np.maximum(np.fft.irfft2(Of * ff[k], s=(W, W)), 0)   # hull over open water
+            acc -= lam * np.maximum(np.fft.irfft2(Of * ff[k], s=(W, W)), 0)      # footprint over open water
         sub = acc[np.ix_(idxs, idxs)]; ij = np.unravel_index(int(sub.argmax()), sub.shape)
         dy, dx = idxs[ij[0]], idxs[ij[1]]
         if sub[ij] > best[0]:
