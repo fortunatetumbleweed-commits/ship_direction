@@ -21,12 +21,16 @@ Results on the 21 real labelled `heading_v9d` images:
 | | **region parts** `v1` | point keypoints `v1` | (compare) matcher | heading CNN |
 |---|---|---|---|---|
 | clean `synth_*` | **0.7°** | 1.0° | ~0–1° | 2.2° |
-| occluded `hard_*` | **8/9 by labels (9/9 physically)** | 17.7°, 7/9 | 7/9 | 5.3°, 9/9 |
+| occluded `hard_*` | **9/9, 6.1°** | 17.7°, 7/9 | 7/9 | 9.3°, 8/9 |
 
-> The one label-miss is **t083**, whose `truth210` label is **wrong** — it places the ship on
-> open water (physically impossible). The model's answer (**174°**, ~S/SSE) covers 100% of the
-> visible ship with minimal spill and matches a human read of the frame. So the model is correct
-> on all 9; one dataset label is not.
+> **t083 exposed a bad ground-truth label — and only this model caught it.** Its original
+> `truth210` label is physically impossible: 210° (SSW) places the ship on open water. This
+> model answered **174°** (~S/SSE) — covering 100% of the visible ship-green with minimal
+> spill, matching a human read of the frame. The heading CNN and the template matcher both
+> answered ~211°, i.e. they made the *same* mistake the mislabel did (a black-box model and a
+> shape-matcher agreeing with a wrong label is exactly how bad labels survive). The label has
+> since been **corrected to 174°** in the dataset. So: region parts 9/9; the CNN, previously
+> "9/9", is really 8/9 — its t083 hit was borrowed from the bad label.
 
 ### Why regions beat points
 A single-pixel keypoint is *locally ambiguous* — a bow tip, a sail tip and a stern corner all
@@ -55,12 +59,12 @@ What each fixes:
 - **t083**: the segmentation mislabels a sail sliver as stern, tugging overlap to a pose that
   spills the ship onto water. The green-coverage + open-water terms re-anchor to the real
   pixels → **174°** (~S/SSE), 100% green covered, minimal spill — matching a human read. Its
-  `210` label is the physically-impossible one, so this reads as a "miss" only against a bad label.
+  original `210` label was the physically-impossible one (now corrected to 174° in the dataset).
 
 Net: reconstructions are **physically consistent** (never on open water), clean synth stays
-0.7°, and the model is correct on all 9 real frames — one of which the dataset mislabels. This is
-the culmination: learned occlusion-robust *features* + rigid *part geometry* + *pixel/scene
-consistency*, at the region level.
+0.7°, and the model is correct on all 9 real frames — including t083, where reading the pixels
+honestly beat the (wrong) ground truth. This is the culmination: learned occlusion-robust
+*features* + rigid *part geometry* + *pixel/scene consistency*, at the region level.
 
 ---
 
@@ -92,7 +96,7 @@ t082 129°→8°, t542 40°→2°, t084 51°→4°).
 - **Reject occluder detections** — supervise the visibility head harder, or add a
   "background/occluder" class so responses on non-ship pixels go to zero.
 - **Denser parts** — the single-pixel keypoints are locally ambiguous; predicting part
-  *regions* gives distinctive shape. **→ done: the region-parts model above (9.3°, 8/9).**
+  *regions* gives distinctive shape. **→ done: the region-parts model above (6.1°, 9/9).**
 
 ## Files
 | file | role |

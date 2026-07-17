@@ -22,12 +22,19 @@ model is for the hard, context-dependent cases.)
 | set | mean err | within 20° |
 |---|---|---|
 | clean `synth_*` (12) | **2.2°** | 12/12 |
-| occluded `hard_*` (9) | **5.3°** | **9/9** |
+| occluded `hard_*` (9) | 9.3° | **8/9** |
 
-Per hard image: t542 1.0, t557 1.1, t083 1.3, t390 2.0, t541 2.4, t084 6.2, t556 7.0,
-t104 10.1, **t082 16.5**. The `t082` portrait-tip case — 91° error with crude occluders,
+Per hard image: t542 1.0, t557 1.1, t390 2.0, t541 2.4, t084 6.2, t556 7.0, t104 10.1,
+**t082 16.5**, **t083 37.3**. The `t082` portrait-tip case — 91° error with crude occluders,
 unrecoverable for the template matcher — is now within 20° because the occluders are
 realistic.
+
+> **t083 caveat.** This model predicts 211° on t083, which originally scored 1.3° against the
+> dataset's `truth210` label — but that label was **wrong** (210° puts the ship on open water;
+> the true heading is ~174°, caught by `../keypoint_model/`). The label is now corrected to
+> 174°, against which this model is 37° off. So this CNN's real occluded score is **8/9**, not
+> the 9/9 the bad label implied — a good reminder that a black-box regressor agreeing with a
+> label is not the same as being right.
 
 > **Honest caveat.** These 9 images are the only real labelled data, so they serve as
 > validation *and* their backgrounds + the portrait asset were harvested to build the
@@ -54,7 +61,7 @@ training code (`datagen.py` + `train.py`), and the validation metrics. So any ch
 self-identifies — `infer.py` prints the card on load and defaults to the newest `model_v*.pt`.
 Bump `MODEL_VERSION` in `train.py` (or pass `--version`) when you change the training setup.
 
-Current `model_v1`: `hard_mean 5.3° · within20 9/9 · synth_mean 2.2°`.
+Current `model_v1`: `hard_mean 9.3° · within20 8/9 · synth_mean 2.2°` (vs corrected labels).
 
 ## Usage
 

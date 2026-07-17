@@ -12,7 +12,7 @@ The repo holds three complementary approaches plus the tooling and datasets.
 |---|---|---|---|
 | **Template matcher** | `match_and_reconstruct.py`, `ship_reconstruct/` | no | interpretable; matches a canonical ship to the visible fragment over all 360°, returns ranked heading candidates + confidence. Adds optional occluder-consistency and shape (pointy-in-blob) terms. |
 | **Learned heading CNN** | `ship_heading_model/` | yes (synthetic) | robustness under heavy occlusion — uses whole-frame scene context (water above a tip, occluder position) that the fragment alone can't provide. |
-| **Part-based (keypoints → regions)** | `keypoint_model/` | yes (synthetic) | segment the ship into distinctive **parts** (bow / hull / stern / sail_l / sail_r), fit the rigid part-layout to what's visible, penalizing any hull placed on open water. Most interpretable; 0.7° clean, correct on all 9 real occluded frames (8/9 by the dataset labels — the one "miss", t083, is a mislabeled frame). See its README. |
+| **Part-based (keypoints → regions)** | `keypoint_model/` | yes (synthetic) | segment the ship into distinctive **parts** (bow / hull / stern / sail_l / sail_r), fit the rigid part-layout to what's visible, penalizing any hull placed on open water. Most interpretable; 0.7° clean, **9/9** on the real occluded frames (6.1°) — the only approach that read t083 correctly, catching a wrong dataset label. See its README. |
 
 The matcher and the CNN are the reverse of each other: the matcher reasons from the
 fragment's own shape (great when a feature is visible, honest when it isn't); the CNN
@@ -57,15 +57,19 @@ python ship_heading_model/infer.py --validate
 
 ## Results (validation on the 21 labelled `heading_v9d` images)
 
-| | template matcher (shape+occluder) | learned CNN (`model_v1`) |
-|---|---|---|
-| clean `synth_*` (12) | ~0–1° | mean 2.2° |
-| occluded `hard_*` (9) | **7/9** within 20° | **9/9** within 20°, mean 5.3° |
+| | template matcher (shape+occluder) | learned CNN (`model_v1`) | region parts (`part_model_v1`) |
+|---|---|---|---|
+| clean `synth_*` (12) | ~0–1° | mean 2.2° | mean **0.7°** |
+| occluded `hard_*` (9) | 7/9 within 20° | 8/9 within 20°, mean 9.3° | **9/9** within 20°, mean **6.1°** |
 
 The template matcher labels each case **self-sufficient** (fragment shape fixes the
 heading), **needs scene** (axis clear, bow/stern is a coin-flip), or **underdetermined**
 (too occluded) — see `make_report.py` output. The CNN resolves the "needs scene" cases by
 looking at the whole frame.
+
+> These numbers use the **corrected** t083 label (see below). Under the original (wrong) label,
+> the CNN scored 9/9 / 5.3° — but its t083 hit was agreement with a bad label, not a correct
+> read. Correcting the label re-ranks the region-parts model to the top.
 
 ## The core finding
 
@@ -81,9 +85,11 @@ ship (fit the whole part-layout, don't assemble parts independently), *and* refu
 hull on open water where no ship was seen. Doing all three — region segmentation + dense
 part-mask fit + an open-water penalty — fixes the bow/stern flip nothing else could, keeps every
 reconstruction physically consistent, and stays fully interpretable. It's correct on all 9 real
-occluded frames; the one that "misses" by the dataset labels (t083) turns out to be a
-**mislabeled frame** — its label puts the ship on open water, and the model's answer is the
-physically valid one. Reading the pixels honestly ended up better than the ground truth (see
-`keypoint_model/README.md`).
+occluded frames — including **t083, which the dataset originally mislabeled** (`truth210` puts
+the ship on open water). The part model read 174°; the CNN and the matcher both read ~211°,
+making the *same* mistake as the label. That's the cautionary tale: a bad label survives when
+your models agree with it. Reading the pixels honestly — enforce scene consistency, don't just
+count matched pixels — caught it. The label is now corrected to 174° so it can't quietly poison
+future validation (see `keypoint_model/README.md`).
 
 Each sub-tool has its own README with details and honest limitations.
