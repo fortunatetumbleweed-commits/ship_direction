@@ -26,7 +26,8 @@ match_and_reconstruct.py    # fragment -> ranked heading candidates + confidence
 make_report.py              # self-contained HTML report (original / extraction / reconstruction)
 ship_reconstruct/           # standalone deterministic matcher + reconstruction (+ README)
 ship_heading_model/         # CNN heading regressor: datagen / train / infer, versioned model_v*.pt (+ README)
-keypoint_model/             # (in progress) part/keypoint detector
+keypoint_model/             # part/keypoint detector: region-parts model (best) + training (+ README)
+ship_parts/                 # STANDALONE drop-in package of the region-parts model, for embedding (+ README)
 heading_v9d_raw_images/     # dataset: 12 clean synth_* + 9 occluded hard_*  (80x80, truthNNN labels)
 heading_hard_cases/         # dataset: 22 full 400x190 game frames + metadata.jsonl (hard real cases)
 ```
@@ -53,6 +54,15 @@ python make_report.py --in-dir heading_hard_cases --out heading_hard_cases/repor
 
 # 4) learned CNN: predict heading + reconstruct, or validate against the labels
 python ship_heading_model/infer.py --validate
+
+# 5) embed the best model in your own app (copy ship_parts/ into your project)
+python ship_parts/test_smoke.py        # verify the standalone package reproduces 9/9, 6.1 deg
+```
+
+```python
+from ship_parts import ShipHeading     # drop-in: 4 files, no dataset, no training code
+est = ShipHeading()
+r = est(rgb80)                          # r.heading, r.shift, r.parts_seen
 ```
 
 ## Results (validation on the 21 labelled `heading_v9d` images)
