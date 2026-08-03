@@ -6,6 +6,15 @@ reconstruct the whole ship at that heading. Heading is `0° = up (north)`, clock
 
 The repo holds three complementary approaches plus the tooling and datasets.
 
+![pipeline on real frames](ship_parts/docs/02-pipeline.png)
+
+*The best approach ([`ship_parts/`](ship_parts/)) segments the ship into 5 whole parts, then
+fits the rigid part-layout to whatever survives the occlusion. The bottom two rows are the
+hard cases: with a **single part** visible — only a stern (t082), only a bow (t083) — the
+geometry still pins the heading.*
+
+![the 5 parts](ship_parts/docs/01-parts.png)
+
 ## Approaches
 
 | approach | where | needs training | best for |
