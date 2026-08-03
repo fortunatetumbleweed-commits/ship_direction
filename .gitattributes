@@ -1,0 +1,11 @@
+# The .html files here are generated, self-contained comparison reports (make_report.py),
+# with images base64-embedded -- ~700 KB each. Left unmarked they dwarf the ~130 KB of
+# Python and GitHub reports the repo as "mostly HTML". Mark them generated so Linguist
+# excludes them from the language stats and collapses them in diffs.
+*.html linguist-generated=true
+
+# Model checkpoints and the frozen canonical assets are binary; be explicit so git never
+# tries to diff or line-ending-normalize them.
+*.pt  binary
+*.npz binary
+*.png binary
