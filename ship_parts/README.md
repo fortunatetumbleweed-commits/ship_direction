@@ -1,21 +1,65 @@
-# ship_parts — standalone heading estimator (drop-in)
+# ship_parts
 
-The region-parts model packaged for embedding in another Python app. Same weights and
-same math as `../keypoint_model/`, with the training code and the dataset dependency
-stripped out.
+Recover a ship's **heading** from an 80×80 game frame, even when the ship is almost
+entirely hidden behind a portrait, village-name text, or map icons — and reconstruct the
+whole ship at that heading. Heading is `0° = up (north)`, clockwise.
 
-## Install
+Drop-in Python package. Copy the folder; no dataset, no training code.
 
-Copy the `ship_parts/` folder into your project. That's it — 4 files:
+---
 
-| file | size | what |
-|---|---|---|
-| `estimator.py` | 9 KB | the whole implementation (net + geometry) |
-| `__init__.py` | — | exports `ShipHeading` |
-| `part_model_v1.pt` | 1.9 MB | trained U-Net weights |
-| `canonical.npz` | 2.3 KB | frozen canonical part-map + ship sprite |
+## How it works
 
-Requires `numpy`, `pillow`, `torch`. **No dataset folder, no training modules.**
+Two stages. The network **recognizes parts**; geometry **turns parts into an angle**.
+
+```
+frame ──► U-Net ──► per-pixel part labels ──► part_pose (rigid fit) ──► heading
+```
+
+### 1. The parts
+
+The ship is carved into 5 whole regions. Each is distinctive (a bow wedge can't be
+mistaken for a stern block), and all 5 rotate together as one rigid body:
+
+![the 5 parts](docs/01-parts.png)
+
+### 2. The U-Net (`SegNet`, 473k params, 1.9 MB)
+
+A small U-Net that labels **every pixel** as one of `bg, bow, hull, stern, sail_l, sail_r`:
+
+```
+encoder  80→40→20  (context: what is here)
+decoder  20→40→80  (location: where exactly)
+   + skip connections carry sharp early detail across, so masks align with real pixels
+head     1×1 conv → 6 scores per pixel
+```
+
+Trained on **20k synthetic frames** — the clean ship rendered at a random heading with real
+game occluders composited on top. Labels come free by rotating the canonical part map, so
+nothing was hand-annotated. Only *visible* parts are labelled, teaching it to segment what
+it can actually see. Selected by lowest heading error on the real frames, not pixel
+accuracy. Training lives in [`../keypoint_model/`](../keypoint_model/).
+
+### 3. The fit (`part_pose`)
+
+The network gives masks, not an angle. `part_pose` searches all rotations for the single
+rigid pose that best explains them, scoring three terms:
+
+| term | meaning |
+|---|---|
+| **+ part overlap** | predicted parts match the canonical layout (recall on labels) |
+| **+ green coverage** | footprint covers the *actual* visible ship pixels (recall on pixels) |
+| **− open-water penalty** | footprint must **not** sit on plainly visible water (precision) |
+
+That last term is what makes reconstructions physically consistent: a ship may hide *under*
+an occluder, but not float on open water where it would have been seen.
+
+![pipeline on real frames](docs/02-pipeline.png)
+
+The bottom two rows are the point — with a **single part** visible, the geometry still pins
+the heading. t082 shows only a stern; t083 only a bow.
+
+---
 
 ## Use
 
@@ -24,70 +68,54 @@ import numpy as np
 from PIL import Image
 from ship_parts import ShipHeading
 
-est = ShipHeading()                       # load once; warms the rotation cache
+est = ShipHeading()                       # load once
 img = np.asarray(Image.open("frame.png").convert("RGB"))   # uint8 (80,80,3) RGB
 
 r = est(img)
 r.heading      # float degrees, 0 = up/north, clockwise
-r.shift        # (dy, dx) placement of the ship
-r.parts_seen   # e.g. ['bow'] or ['bow','hull','stern','sail_l','sail_r']
-r.labels       # (80,80) uint8 per-pixel part ids
-r.probs        # (6,80,80) float32 class probabilities
+r.shift        # (dy, dx) ship placement
+r.parts_seen   # e.g. ['bow']
+r.labels       # (80,80) uint8 part ids
+r.probs        # (6,80,80) float32 probabilities
 
-recon = est.reconstruct(img, r)           # (80,80,3) uint8, whole ship painted in
+recon = est.reconstruct(img, r)           # (80,80,3) uint8 — pass r, or it re-estimates
 ```
 
 Options: `ShipHeading(device="cpu", step=3, model_path=..., canonical_path=...)`.
 
-## Input contract (get this exact, or accuracy degrades silently)
+**Input contract** — wrong shape raises, but these fail *silently*:
+- **RGB** channel order (convert if you're using OpenCV, which gives BGR)
+- **80×80 uint8**, raw frame — normalization happens inside
+- ship at the game's fixed scale, roughly centered
 
-- **80×80**, `uint8`, **RGB** channel order — if you're using OpenCV, convert from BGR.
-- Pass the **raw frame**; the module does its own normalization (`/255 − 0.5`) internally.
-- The ship icon is assumed at the game's fixed scale, roughly centered.
+## Accuracy & speed
 
-`estimate()` raises `ValueError` on a wrong shape, but it cannot detect BGR or a wrong
-scale — those just quietly produce worse headings.
-
-## Performance (M-series, CPU)
+On the 21 labelled frames: **0.7°** mean on clean, **6.1°** mean on occluded, **9/9** within 20°.
 
 ```
-init (incl. rotation cache): ~60 ms      <- once, at startup
-per frame:                   ~39 ms      <- ~25 fps
-  of which net forward:      ~10 ms
-  of which pose fit:         ~29 ms
+init         ~60 ms   (once — builds the rotation cache)
+per frame    ~39 ms   = 10 ms U-Net + 29 ms pose fit
+reconstruct  ~0.4 ms  (optional; not needed for heading)
 ```
 
-**Device:** defaults to `cpu` on purpose. For a single 80×80 frame the MPS transfer and
-launch overhead typically exceeds the compute saved — measure before switching.
+Defaults to **CPU** deliberately — for one 80×80 frame, MPS transfer overhead exceeds the
+compute saved. `step=6` → ~27 ms; all tested values stay 9/9, and the small mean-error
+differences between them are noise on a 9-image sample, not a real accuracy gain.
 
-**`step`** (rotation granularity, degrees) is the speed lever: `step=6` → ~27 ms,
-`step=10` → ~22 ms. All tested values stay 9/9 within 20° on the real set; the small
-mean-error differences between them are **noise on a 9-image sample**, not evidence that
-one is more accurate. Coarser `step` does add heading quantization (max error `step/2`).
+Each instance owns its cache, so instances are independent — don't share one across threads.
 
-**Threading:** each `ShipHeading` instance owns its rotation cache, so instances are
-independent — but don't share one instance across threads without a lock.
+## Files
 
-## Verify the extraction
+| file | |
+|---|---|
+| `estimator.py` | the whole implementation (net + geometry), 9 KB |
+| `part_model_v1.pt` | trained weights, self-describing (`est.meta`) |
+| `canonical.npz` | frozen part map + ship sprite, 2.3 KB |
+| `test_smoke.py` | verifies the package still reproduces 0.7° / 6.1° / 9-of-9 |
+| `make_docs.py` | regenerates the figures above |
 
 ```bash
-python ship_parts/test_smoke.py
+python ship_parts/test_smoke.py     # run after touching estimator.py
 ```
 
-Runs the 21 labelled frames and asserts the standalone module still reproduces the
-in-repo numbers (clean 0.7°, occluded 9/9 within 20°, mean 6.1°). This is the only place
-the dataset is touched — it is never needed at inference time. Re-run it after changing
-anything in `estimator.py`.
-
-## What was changed in extraction (and why)
-
-1. **Froze the canonical assets.** `parts.canonical_parts()` rebuilt the ship sprite by
-   reading the 12 `synth_*.png` files *at runtime*; that's now baked into `canonical.npz`,
-   so the dataset isn't a deployment dependency.
-2. **Lifted `SegNet` out of `parts_train.py`**, which imported `datagen` (fonts,
-   backgrounds, portrait assets) purely for training.
-3. **Pre-rotation cache is explicit** (`_Rot`) instead of module-level dicts, so instances
-   don't share hidden global state.
-
-The math is unchanged — `part_pose` keeps the same three terms and the same
-`lam=0.4, beta=1.0`, which is what `test_smoke.py` pins.
+The dataset is used **only** by `test_smoke.py`, never at inference.
