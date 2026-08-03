@@ -23,6 +23,47 @@ geometry still pins the heading.*
 
 ![the 5 parts](ship_parts/docs/01-parts.png)
 
+## Using the U-Net library
+
+Copy the [`ship_parts/`](ship_parts/) folder into your project — 4 files, ~1.9 MB, no
+dataset and no training code. Needs `numpy`, `pillow`, `torch`.
+
+```python
+import numpy as np
+from PIL import Image
+from ship_parts import ShipHeading
+
+est = ShipHeading()                       # load once (weights + rotation cache)
+img = np.asarray(Image.open("frame.png").convert("RGB"))   # uint8 (80,80,3), RGB
+
+r = est(img)
+r.heading      # float degrees, 0 = up/north, clockwise
+r.shift        # (dy, dx) where the ship sits
+r.parts_seen   # which parts survived the occlusion, e.g. ['bow']
+r.labels       # (80,80) uint8 per-pixel part ids
+r.probs        # (6,80,80) float32 class probabilities
+
+recon = est.reconstruct(img, r)           # (80,80,3) uint8 — whole ship painted in
+```
+
+Options: `ShipHeading(device="cpu", step=3, model_path=..., canonical_path=...)`.
+
+**Input contract.** A wrong shape raises, but these fail *silently* — get them right:
+- **RGB** channel order (OpenCV gives BGR — convert first)
+- **80×80 `uint8`**, the raw frame; normalization happens inside
+- ship at the game's fixed scale, roughly centered
+
+**Speed** (M-series CPU): ~60 ms one-time init, then **~39 ms per frame** (10 ms U-Net +
+29 ms geometric fit). `reconstruct()` adds only ~0.4 ms and isn't needed for the heading —
+pass the `r` you already have, or it re-estimates. Defaults to CPU deliberately: for a
+single 80×80 frame, MPS transfer overhead exceeds the compute it saves.
+
+```bash
+python ship_parts/test_smoke.py     # asserts it still gives 0.7° clean / 6.1° occluded / 9-of-9
+```
+
+Full API, figures, and how the model was trained: [`ship_parts/README.md`](ship_parts/README.md).
+
 ## Approaches
 
 | approach | where | needs training | best for |
@@ -72,14 +113,8 @@ python make_report.py --in-dir heading_hard_cases --out heading_hard_cases/repor
 # 4) learned CNN: predict heading + reconstruct, or validate against the labels
 python ship_heading_model/infer.py --validate
 
-# 5) embed the best model in your own app (copy ship_parts/ into your project)
-python ship_parts/test_smoke.py        # verify the standalone package reproduces 9/9, 6.1 deg
-```
-
-```python
-from ship_parts import ShipHeading     # drop-in: 4 files, no dataset, no training code
-est = ShipHeading()
-r = est(rgb80)                          # r.heading, r.shift, r.parts_seen
+# 5) the U-Net itself: verify the drop-in package reproduces 9/9, 6.1 deg
+python ship_parts/test_smoke.py        # (see "Using the U-Net library" above to embed it)
 ```
 
 ## Results (validation on the 21 labelled `heading_v9d` images)
