@@ -1,10 +1,18 @@
-# Ship heading estimation & de-occlusion
+# Ship direction estimation & reconstruction — a trained U-Net
 
-Recover the **heading** of a ship icon in an 80×80 top-down game frame — where the ship
-may be heavily occluded by portraits, village-name text, and minimap markers — and
-reconstruct the whole ship at that heading. Heading is `0° = up (north)`, clockwise.
+A **U-Net trained to estimate a ship's direction (heading)** in an 80×80 top-down game
+frame — where the ship may be almost entirely hidden behind portraits, village-name text,
+and minimap markers — and to **reconstruct the whole ship** at that heading.
+Heading is `0° = up (north)`, clockwise.
 
-The repo holds three complementary approaches plus the tooling and datasets.
+The U-Net labels every pixel as a ship **part** (bow / hull / stern / sail_l / sail_r); a
+rigid geometric fit then turns those part masks into a heading, refusing any pose that would
+place the hull on open water. It gets **9/9 within 20° (6.1° mean)** on the real occluded
+frames — including one the dataset itself had mislabeled.
+
+Ready to embed: [`ship_parts/`](ship_parts/) is a drop-in Python package (4 files, no
+dataset, no training code). Two further approaches — a deterministic template matcher and a
+direct heading-regression CNN — are kept for comparison, along with the tooling and datasets.
 
 ![pipeline on real frames](ship_parts/docs/02-pipeline.png)
 
@@ -21,7 +29,7 @@ geometry still pins the heading.*
 |---|---|---|---|
 | **Template matcher** | `match_and_reconstruct.py`, `ship_reconstruct/` | no | interpretable; matches a canonical ship to the visible fragment over all 360°, returns ranked heading candidates + confidence. Adds optional occluder-consistency and shape (pointy-in-blob) terms. |
 | **Learned heading CNN** | `ship_heading_model/` | yes (synthetic) | robustness under heavy occlusion — uses whole-frame scene context (water above a tip, occluder position) that the fragment alone can't provide. |
-| **Part-based (keypoints → regions)** | `keypoint_model/` | yes (synthetic) | segment the ship into distinctive **parts** (bow / hull / stern / sail_l / sail_r), fit the rigid part-layout to what's visible, penalizing any hull placed on open water. Most interpretable; 0.7° clean, **9/9** on the real occluded frames (6.1°) — the only approach that read t083 correctly, catching a wrong dataset label. See its README. |
+| **U-Net part segmentation** ⭐ | `ship_parts/` (drop-in), trained in `keypoint_model/` | yes (synthetic) | a **U-Net** segments the ship into distinctive **parts** (bow / hull / stern / sail_l / sail_r); a rigid fit of the part-layout recovers the heading, penalizing any hull placed on open water. Best and most interpretable; 0.7° clean, **9/9** on the real occluded frames (6.1°) — the only approach that read t083 correctly, catching a wrong dataset label. |
 
 The matcher and the CNN are the reverse of each other: the matcher reasons from the
 fragment's own shape (great when a feature is visible, honest when it isn't); the CNN
