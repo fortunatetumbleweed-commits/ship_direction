@@ -12,6 +12,7 @@ file, and numpy / pillow / torch. No training code, no dataset folder.
 
 Pipeline:  frame -> SegNet (per-pixel part labels) -> part_pose (rigid fit) -> heading.
 """
+import json
 import os
 from dataclasses import dataclass, field
 
@@ -133,6 +134,14 @@ def part_pose(P, rot, open_mask=None, ship_mask=None, lam=0.4, beta=1.0, smax=16
 
 # ---------------------------------------------------------------- public API
 
+def _default_weights():
+    """Prefer the local .pt checkpoint; fall back to the Hub-style .safetensors."""
+    for name in ("part_model_v1.pt", "model.safetensors"):
+        p = os.path.join(HERE, name)
+        if os.path.exists(p):
+            return p
+    return os.path.join(HERE, "part_model_v1.pt")
+
 @dataclass
 class Result:
     heading: float                       # degrees, 0 = up/north, clockwise
@@ -146,13 +155,24 @@ class ShipHeading:
 
     def __init__(self, model_path=None, canonical_path=None, device="cpu", step=3):
         self.device = device
-        ck = torch.load(model_path or os.path.join(HERE, "part_model_v1.pt"),
-                        map_location=device, weights_only=False)
-        state, self.meta = (ck["state_dict"], ck.get("meta", {})) if "state_dict" in ck else (ck, {})
+        state, self.meta = self._load_weights(model_path or _default_weights(), device)
         self.net = SegNet().to(device); self.net.load_state_dict(state); self.net.eval()
         z = np.load(canonical_path or os.path.join(HERE, "canonical.npz"))
         self.L0, self.sprite = z["L0"], z["sprite"]
         self.rot = _Rot(self.L0, step)          # warm the rotation cache up front
+
+    @staticmethod
+    def _load_weights(path, device):
+        """Accept either a .pt checkpoint (meta embedded) or .safetensors (meta in config.json)."""
+        if str(path).endswith(".safetensors"):
+            from safetensors.torch import load_file
+            cfg = os.path.join(os.path.dirname(os.path.abspath(path)), "config.json")
+            meta = json.load(open(cfg)) if os.path.exists(cfg) else {}
+            return load_file(path, device=device), meta
+        ck = torch.load(path, map_location=device, weights_only=False)
+        if isinstance(ck, dict) and "state_dict" in ck:
+            return ck["state_dict"], ck.get("meta", {})
+        return ck, {}
 
     @torch.no_grad()
     def segment(self, rgb80):
