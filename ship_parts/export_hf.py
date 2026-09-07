@@ -15,7 +15,13 @@ from safetensors.torch import save_file
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 OUT = os.path.join(ROOT, "hf_export")
+SPACE = os.path.join(ROOT, "hf_space")
+RAW = os.path.join(ROOT, "heading_v9d_raw_images")
 REPO_ID = "fortunatetumbleweed/ship-direction"      # substituted into the model card
+
+# click-to-try frames for the Space: clean -> light occlusion -> single part visible
+EXAMPLES = ["synth_s02_truth205.png", "hard_t557_truth347.png",
+            "hard_t082_truth168.png", "hard_t083_truth174.png"]
 
 def main():
     shutil.rmtree(OUT, ignore_errors=True)          # never publish stale files or __pycache__
@@ -44,10 +50,21 @@ def main():
     for name, text in (("README.md", CARD), ("app.py", APP), ("requirements.txt", REQS)):
         open(os.path.join(OUT, name), "w").write(text.replace("{REPO_ID}", REPO_ID))
 
-    print(f"wrote {OUT}")
-    for f in sorted(os.listdir(OUT)):
-        p = os.path.join(OUT, f)
-        print(f"  {os.path.getsize(p) if os.path.isfile(p) else '-':>9} {f}")
+    # --- Space: same runtime files, but its own README frontmatter + examples ---
+    shutil.rmtree(SPACE, ignore_errors=True)
+    os.makedirs(os.path.join(SPACE, "examples"), exist_ok=True)
+    for f in ("model.safetensors", "canonical.npz", "config.json", "estimator.py",
+              "app.py", "requirements.txt", "LICENSE"):
+        shutil.copy(os.path.join(OUT, f), os.path.join(SPACE, f))
+    for f in EXAMPLES:
+        shutil.copy(os.path.join(RAW, f), os.path.join(SPACE, "examples", f))
+    open(os.path.join(SPACE, "README.md"), "w").write(SPACE_CARD.replace("{REPO_ID}", REPO_ID))
+
+    for d in (OUT, SPACE):
+        print(f"\nwrote {d}")
+        for f in sorted(os.listdir(d)):
+            p = os.path.join(d, f)
+            print(f"  {os.path.getsize(p) if os.path.isfile(p) else '-':>9} {f}")
 
 CARD = '''---
 license: apache-2.0
@@ -178,7 +195,36 @@ research and educational use.
 Source: https://github.com/fortunatetumbleweed-commits/ship_direction
 '''
 
+SPACE_CARD = '''---
+title: Ship Direction
+emoji: 🚢
+colorFrom: blue
+colorTo: green
+sdk: gradio
+app_file: app.py
+pinned: false
+license: apache-2.0
+short_description: Read a ship's heading through heavy occlusion, then rebuild it
+models:
+  - {REPO_ID}
+---
+
+# Ship direction from an occluded frame
+
+A U-Net segments an 80x80 top-down game frame into 5 ship parts
+(bow / hull / stern / sail_l / sail_r); a rigid geometric fit then turns those masks into a
+**heading**, refusing any pose that would place the hull on open water. `0 deg = up`, clockwise.
+
+Click an example below. The last two are the interesting ones: **only a stern** is visible in
+t082, **only a bow** in t083, and the geometry still pins the heading to within 6 degrees.
+
+Model card, weights, and training details: https://huggingface.co/{REPO_ID}
+'''
+
 APP = '''"""Gradio demo for the ship-direction model (Hugging Face Space)."""
+import glob
+import os
+
 import numpy as np
 import gradio as gr
 from PIL import Image
@@ -214,6 +260,9 @@ with gr.Blocks(title="Ship direction") as demo:
         rec = gr.Image(label="reconstruction", height=320)
     out = gr.Markdown()
     inp.change(run, inp, [seg, rec, out])
+    ex = sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples", "*.png")))
+    if ex:
+        gr.Examples(examples=ex, inputs=inp, label="Try one — the last two show a single visible part")
     gr.Markdown(
         "Colors: <span style='color:#ff4646'>bow</span>, "
         "<span style='color:#9b9ba0'>hull</span>, "
