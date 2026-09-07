@@ -15,8 +15,10 @@ from safetensors.torch import save_file
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 OUT = os.path.join(ROOT, "hf_export")
+REPO_ID = "fortunatetumbleweed/ship-direction"      # substituted into the model card
 
 def main():
+    shutil.rmtree(OUT, ignore_errors=True)          # never publish stale files or __pycache__
     os.makedirs(os.path.join(OUT, "docs"), exist_ok=True)
     ck = torch.load(os.path.join(HERE, "part_model_v1.pt"), map_location="cpu", weights_only=False)
     meta, state = ck["meta"], ck["state_dict"]
@@ -40,7 +42,7 @@ def main():
     shutil.copy(os.path.join(ROOT, "LICENSE"), os.path.join(OUT, "LICENSE"))
 
     for name, text in (("README.md", CARD), ("app.py", APP), ("requirements.txt", REQS)):
-        open(os.path.join(OUT, name), "w").write(text)
+        open(os.path.join(OUT, name), "w").write(text.replace("{REPO_ID}", REPO_ID))
 
     print(f"wrote {OUT}")
     for f in sorted(os.listdir(OUT)):
@@ -103,7 +105,7 @@ from PIL import Image
 from huggingface_hub import hf_hub_download
 from estimator import ShipHeading   # this repo's estimator.py
 
-REPO = "<username>/ship-direction"
+REPO = "{REPO_ID}"
 est = ShipHeading(
     model_path=hf_hub_download(REPO, "model.safetensors"),
     canonical_path=hf_hub_download(REPO, "canonical.npz"),
